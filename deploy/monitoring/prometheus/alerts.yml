@@ -1,0 +1,69 @@
+groups:
+  - name: api
+    rules:
+      - alert: ApiHighErrorRate
+        expr: |
+          sum(rate(http_requests_total{status=~"5.."}[5m]))
+            / sum(rate(http_requests_total[5m])) > 0.05
+        for: 5m
+        labels: { severity: critical }
+        annotations:
+          summary: "API 5xx error rate > 5%"
+          description: "5xx rate is {{ $value | humanizePercentage }} over 5m."
+
+      - alert: ApiHighLatency
+        expr: histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le)) > 1.5
+        for: 10m
+        labels: { severity: warning }
+        annotations:
+          summary: "API p95 latency > 1.5s"
+
+      - alert: ApiDown
+        expr: up{job="api"} == 0
+        for: 2m
+        labels: { severity: critical }
+        annotations: { summary: "An API instance is down" }
+
+  - name: workers
+    rules:
+      - alert: DeadLetterGrowing
+        expr: increase(jobs_processed_total{outcome="dead"}[15m]) > 5
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Jobs entering the dead-letter queue" }
+
+      - alert: QueueBacklog
+        expr: job_queue_depth{status="pending"} > 500
+        for: 10m
+        labels: { severity: warning }
+        annotations: { summary: "Pending job backlog > 500" }
+
+  - name: datastores
+    rules:
+      - alert: PostgresDown
+        expr: pg_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: "PostgreSQL is down" }
+
+      - alert: PostgresConnectionsHigh
+        expr: sum(pg_stat_activity_count) > 180
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "Postgres connections near max_connections (200)" }
+
+      - alert: RedisDown
+        expr: redis_up == 0
+        for: 1m
+        labels: { severity: critical }
+        annotations: { summary: "Redis is down" }
+
+  - name: ai_providers
+    rules:
+      - alert: AIProviderErrors
+        expr: |
+          sum(rate(ai_provider_requests_total{outcome="error"}[5m])) by (provider)
+            / sum(rate(ai_provider_requests_total[5m])) by (provider) > 0.1
+        for: 5m
+        labels: { severity: warning }
+        annotations: { summary: "AI provider {{ $labels.provider }} error rate > 10%" }

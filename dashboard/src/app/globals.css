@@ -1,0 +1,70 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    /* Distinctive type system (loaded via <link> in the root layout). */
+    --font-display: "Fraunces", Georgia, "Times New Roman", serif;
+    --font-sans: "Manrope", ui-sans-serif, system-ui, -apple-system, sans-serif;
+    --font-mono: "JetBrains Mono", ui-monospace, SFMono-Regular, monospace;
+    /* Warm paper canvas + ember accent. Refined editorial palette. */
+    --background: 40 30% 97%;
+    --foreground: 25 20% 12%;
+    --card: 40 33% 99%;
+    --card-foreground: 25 20% 12%;
+    --popover: 40 33% 99%;
+    --popover-foreground: 25 20% 12%;
+    --primary: 18 80% 48%;            /* ember */
+    --primary-foreground: 40 33% 99%;
+    --secondary: 30 16% 92%;
+    --secondary-foreground: 25 20% 18%;
+    --muted: 30 16% 93%;
+    --muted-foreground: 25 8% 42%;
+    --accent: 30 18% 90%;
+    --accent-foreground: 25 20% 18%;
+    --destructive: 0 72% 48%;
+    --destructive-foreground: 40 33% 99%;
+    --success: 150 50% 36%;
+    --success-foreground: 40 33% 99%;
+    --border: 30 14% 86%;
+    --input: 30 14% 86%;
+    --ring: 18 80% 48%;
+    --radius: 0.625rem;
+  }
+  .dark {
+    --background: 25 18% 9%;
+    --foreground: 40 20% 92%;
+    --card: 25 16% 12%;
+    --card-foreground: 40 20% 92%;
+    --popover: 25 16% 12%;
+    --popover-foreground: 40 20% 92%;
+    --primary: 18 82% 55%;
+    --primary-foreground: 25 18% 9%;
+    --secondary: 25 12% 18%;
+    --secondary-foreground: 40 20% 92%;
+    --muted: 25 12% 18%;
+    --muted-foreground: 40 8% 60%;
+    --accent: 25 12% 20%;
+    --accent-foreground: 40 20% 92%;
+    --destructive: 0 62% 50%;
+    --destructive-foreground: 40 20% 92%;
+    --success: 150 45% 45%;
+    --success-foreground: 25 18% 9%;
+    --border: 25 10% 22%;
+    --input: 25 10% 24%;
+    --ring: 18 82% 55%;
+  }
+}
+
+@layer base {
+  * { @apply border-border; }
+  body { @apply bg-background text-foreground antialiased; font-feature-settings: "ss01", "cv01"; }
+  h1, h2, h3 { @apply font-display tracking-tight; }
+}
+
+/* subtle paper grain on the app shell */
+.app-grain {
+  background-image: radial-gradient(hsl(var(--foreground) / 0.018) 1px, transparent 1px);
+  background-size: 4px 4px;
+}

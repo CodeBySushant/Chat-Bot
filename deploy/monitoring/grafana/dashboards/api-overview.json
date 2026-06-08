@@ -1,0 +1,53 @@
+{
+  "uid": "api-overview",
+  "title": "API Overview",
+  "tags": ["chatbot-saas", "api"],
+  "timezone": "browser",
+  "schemaVersion": 39,
+  "version": 1,
+  "refresh": "30s",
+  "time": { "from": "now-6h", "to": "now" },
+  "templating": { "list": [] },
+  "panels": [
+    {
+      "type": "stat", "title": "Request rate (req/s)",
+      "gridPos": { "h": 6, "w": 6, "x": 0, "y": 0 },
+      "targets": [ { "expr": "sum(rate(http_requests_total[5m]))", "legendFormat": "rps" } ]
+    },
+    {
+      "type": "stat", "title": "5xx error %",
+      "gridPos": { "h": 6, "w": 6, "x": 6, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "percentunit", "thresholds": { "mode": "absolute", "steps": [ { "color": "green", "value": null }, { "color": "red", "value": 0.05 } ] } } },
+      "targets": [ { "expr": "sum(rate(http_requests_total{status=~\"5..\"}[5m])) / clamp_min(sum(rate(http_requests_total[5m])),1)" } ]
+    },
+    {
+      "type": "timeseries", "title": "Latency p50/p95/p99",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 0 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [
+        { "expr": "histogram_quantile(0.50, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p50" },
+        { "expr": "histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p95" },
+        { "expr": "histogram_quantile(0.99, sum(rate(http_request_duration_seconds_bucket[5m])) by (le))", "legendFormat": "p99" }
+      ]
+    },
+    {
+      "type": "timeseries", "title": "Requests by status",
+      "gridPos": { "h": 8, "w": 12, "x": 0, "y": 8 },
+      "targets": [ { "expr": "sum(rate(http_requests_total[5m])) by (status)", "legendFormat": "{{status}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "Top routes by latency (p95)",
+      "gridPos": { "h": 8, "w": 12, "x": 12, "y": 8 },
+      "fieldConfig": { "defaults": { "unit": "s" } },
+      "targets": [ { "expr": "topk(8, histogram_quantile(0.95, sum(rate(http_request_duration_seconds_bucket[5m])) by (le, route)))", "legendFormat": "{{route}}" } ]
+    },
+    {
+      "type": "timeseries", "title": "AI provider latency p95 / error rate",
+      "gridPos": { "h": 8, "w": 24, "x": 0, "y": 16 },
+      "targets": [
+        { "expr": "histogram_quantile(0.95, sum(rate(ai_provider_latency_seconds_bucket[5m])) by (le, provider))", "legendFormat": "p95 {{provider}}" },
+        { "expr": "sum(rate(ai_provider_requests_total{outcome=\"error\"}[5m])) by (provider)", "legendFormat": "errors {{provider}}" }
+      ]
+    }
+  ]
+}

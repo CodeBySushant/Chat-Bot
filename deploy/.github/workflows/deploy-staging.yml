@@ -1,0 +1,65 @@
+name: Deploy Staging
+
+on:
+  push:
+    branches: [develop]
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-staging
+  cancel-in-progress: false
+
+jobs:
+  build-push:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    outputs:
+      tag: ${{ steps.meta.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+      - id: meta
+        run: echo "tag=staging-${GITHUB_SHA::12}" >> "$GITHUB_OUTPUT"
+      - uses: docker/setup-buildx-action@v3
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push api
+        uses: docker/build-push-action@v6
+        with:
+          context: saas-db
+          file: deploy/docker/Dockerfile.backend
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/chatbot-api:${{ steps.meta.outputs.tag }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+      - name: Build & push worker
+        uses: docker/build-push-action@v6
+        with:
+          context: saas-db
+          file: deploy/docker/Dockerfile.worker
+          push: true
+          tags: ghcr.io/${{ github.repository_owner }}/chatbot-worker:${{ steps.meta.outputs.tag }}
+
+  deploy:
+    needs: build-push
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Deploy over SSH (migrate -> rolling update -> verify)
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.STAGING_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          script: |
+            set -euo pipefail
+            cd /opt/chatbot-saas
+            export TAG=${{ needs.build-push.outputs.tag }}
+            docker compose -f compose/docker-compose.yml pull api worker frontend
+            docker compose -f compose/docker-compose.yml run --rm api alembic upgrade head
+            docker compose -f compose/docker-compose.yml -f compose/docker-compose.prod.yml up -d --no-deps api worker frontend
+            ./scripts/wait-healthy.sh api 90

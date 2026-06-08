@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Widget demo — any website</title>
+  <style>
+    body { font-family: -apple-system, system-ui, sans-serif; margin: 0; color: #1c1917; }
+    .hero { max-width: 720px; margin: 0 auto; padding: 80px 24px; }
+    h1 { font-size: 40px; letter-spacing: -.02em; }
+    p { color: #57534e; line-height: 1.6; }
+    code { background: #f5f5f4; padding: 2px 6px; border-radius: 6px; font-size: 13px; }
+  </style>
+</head>
+<body>
+  <div class="hero">
+    <h1>Acme Inc.</h1>
+    <p>This is an ordinary website. The AI chat widget below is added with a single
+    script tag and runs in an isolated Shadow DOM, so it never collides with this
+    page's styles.</p>
+    <p>Replace <code>data-key</code> with your chatbot's public key and
+    <code>data-api</code> with your API host.</p>
+  </div>
+
+  <!-- ===== The entire integration: one script tag ===== -->
+  <script
+    src="/widget.js"
+    data-key="REPLACE_WITH_PUBLIC_KEY"
+    data-api="http://127.0.0.1:8000"></script>
+</body>
+</html>

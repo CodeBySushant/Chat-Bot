@@ -1,0 +1,87 @@
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main, develop]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  lint-type:
+    name: Lint + Type check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install ruff mypy -r saas-db/requirements.txt
+      - name: Ruff (lint)
+        run: ruff check saas-db/app
+      - name: Ruff (format check)
+        run: ruff format --check saas-db/app
+      - name: mypy
+        run: mypy saas-db/app || true   # tighten to hard-fail once fully typed
+
+  test:
+    name: Tests (pytest + live Postgres)
+    runs-on: ubuntu-latest
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env: { POSTGRES_PASSWORD: postgres, POSTGRES_DB: chatbot_saas }
+        ports: ["5432:5432"]
+        options: >-
+          --health-cmd "pg_isready -U postgres" --health-interval 10s
+          --health-timeout 5s --health-retries 5
+      qdrant:
+        image: qdrant/qdrant:v1.12.1
+        ports: ["6333:6333"]
+    env:
+      DATABASE_URL: postgresql+asyncpg://app_rw:app_rw@localhost:5432/chatbot_saas
+      DATABASE_ADMIN_URL: postgresql+asyncpg://app_admin:app_admin@localhost:5432/chatbot_saas
+      JWT_SECRET_KEY: ci-test-secret-not-for-prod
+      QDRANT_URL: http://localhost:6333
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with: { python-version: "3.12", cache: pip }
+      - run: pip install -r saas-db/requirements.txt pytest pytest-asyncio
+      - name: Provision DB roles + migrate
+        run: |
+          psql "postgresql://postgres:postgres@localhost:5432/chatbot_saas" -f deploy/postgres/init/00-roles.sql
+          cd saas-db && alembic upgrade head
+      - name: Run test suites
+        run: cd saas-db && pytest -q
+
+  frontend:
+    name: Frontend build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: "20", cache: npm, cache-dependency-path: dashboard/package-lock.json }
+      - run: cd dashboard && npm ci && npm run lint && npx tsc --noEmit && npm run build
+
+  security-scan:
+    name: Security scans
+    runs-on: ubuntu-latest
+    permissions: { contents: read, security-events: write }
+    steps:
+      - uses: actions/checkout@v4
+      - name: Trivy filesystem (deps + secrets + misconfig)
+        uses: aquasecurity/trivy-action@0.24.0
+        with:
+          scan-type: fs
+          scan-ref: .
+          format: sarif
+          output: trivy.sarif
+          severity: CRITICAL,HIGH
+      - uses: github/codeql-action/upload-sarif@v3
+        with: { sarif_file: trivy.sarif }
+      - name: pip-audit
+        run: pip install pip-audit && pip-audit -r saas-db/requirements.txt || true
+      - name: Gitleaks (secret detection)
+        uses: gitleaks/gitleaks-action@v2

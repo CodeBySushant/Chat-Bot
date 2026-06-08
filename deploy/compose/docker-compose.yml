@@ -1,0 +1,184 @@
+# Production stack. Override with docker-compose.prod.yml for resource limits +
+# file-based secrets:  docker compose -f docker-compose.yml -f docker-compose.prod.yml up -d
+name: chatbot-saas
+
+x-logging: &default-logging
+  driver: json-file
+  options: { max-size: "10m", max-file: "5" }
+
+networks:
+  edge:        # nginx <-> api/frontend/widget
+  internal:    # app <-> datastores (no external access)
+    internal: true
+
+volumes:
+  pg_data:
+  pg_backups:
+  qdrant_data:
+  qdrant_snapshots:
+  redis_data:
+  uploads:
+  letsencrypt:
+  certbot_www:
+
+secrets:
+  jwt_secret_key:        { file: ./secrets/jwt_secret_key }
+  postgres_password:     { file: ./secrets/postgres_password }
+  database_url:          { file: ./secrets/database_url }
+  database_admin_url:    { file: ./secrets/database_admin_url }
+  stripe_api_key:        { file: ./secrets/stripe_api_key }
+  stripe_webhook_secret: { file: ./secrets/stripe_webhook_secret }
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: chatbot_saas
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD_FILE: /run/secrets/postgres_password
+    secrets: [postgres_password]
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+      - pg_backups:/backups
+      - ./postgres/init:/docker-entrypoint-initdb.d:ro
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres -d chatbot_saas"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    logging: *default-logging
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: ["redis-server", "--appendonly", "yes", "--maxmemory", "256mb", "--maxmemory-policy", "allkeys-lru"]
+    volumes: [redis_data:/data]
+    networks: [internal]
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+
+  qdrant:
+    image: qdrant/qdrant:v1.12.1
+    restart: unless-stopped
+    environment:
+      QDRANT__SERVICE__API_KEY_FILE: /run/secrets/qdrant_api_key
+    volumes:
+      - qdrant_data:/qdrant/storage
+      - qdrant_snapshots:/qdrant/snapshots
+    networks: [internal]
+    healthcheck:
+      test: ["CMD-SHELL", "bash -c ':> /dev/tcp/127.0.0.1/6333' || exit 1"]
+      interval: 15s
+      timeout: 3s
+      retries: 5
+    logging: *default-logging
+
+  api:
+    build:
+      context: ../../saas-db
+      dockerfile: ../deploy/docker/Dockerfile.backend
+    image: ${REGISTRY:-ghcr.io/acme}/chatbot-api:${TAG:-latest}
+    restart: unless-stopped
+    env_file: [./.env]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      DATABASE_ADMIN_URL_FILE: /run/secrets/database_admin_url
+      JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      OTEL_ENABLED: "true"
+      OTEL_EXPORTER_OTLP_ENDPOINT: http://otel-collector:4317
+      LOG_FORMAT: json
+    secrets: [jwt_secret_key, database_url, database_admin_url, stripe_api_key, stripe_webhook_secret]
+    volumes: [uploads:/app/storage]
+    networks: [edge, internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:8000/readyz"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    logging: *default-logging
+
+  worker:
+    build:
+      context: ../../saas-db
+      dockerfile: ../deploy/docker/Dockerfile.worker
+    image: ${REGISTRY:-ghcr.io/acme}/chatbot-worker:${TAG:-latest}
+    restart: unless-stopped
+    env_file: [./.env]
+    environment:
+      DATABASE_URL_FILE: /run/secrets/database_url
+      DATABASE_ADMIN_URL_FILE: /run/secrets/database_admin_url
+      JWT_SECRET_KEY_FILE: /run/secrets/jwt_secret_key
+      REDIS_URL: redis://redis:6379/0
+      QDRANT_URL: http://qdrant:6333
+      JOB_WORKERS: "4"
+      LOG_FORMAT: json
+    secrets: [jwt_secret_key, database_url, database_admin_url, stripe_api_key]
+    volumes: [uploads:/app/storage]
+    networks: [internal]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+      qdrant: { condition: service_healthy }
+    logging: *default-logging
+
+  frontend:
+    build:
+      context: ../../dashboard
+      dockerfile: ../deploy/docker/Dockerfile.frontend
+    image: ${REGISTRY:-ghcr.io/acme}/chatbot-frontend:${TAG:-latest}
+    restart: unless-stopped
+    environment:
+      NEXT_PUBLIC_API_BASE: https://api.example.com
+    networks: [edge]
+    logging: *default-logging
+
+  widget:
+    build:
+      context: ../../widget
+      dockerfile: ../deploy/docker/Dockerfile.widget
+    image: ${REGISTRY:-ghcr.io/acme}/chatbot-widget:${TAG:-latest}
+    restart: unless-stopped
+    networks: [edge]
+    logging: *default-logging
+
+  nginx:
+    image: nginx:1.27-alpine
+    restart: unless-stopped
+    ports: ["80:80", "443:443"]
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/conf.d:/etc/nginx/conf.d:ro
+      - letsencrypt:/etc/letsencrypt:ro
+      - certbot_www:/var/www/certbot:ro
+    networks: [edge]
+    depends_on: [api, frontend, widget]
+    healthcheck:
+      test: ["CMD", "wget", "-qO-", "http://127.0.0.1/healthz"]
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    logging: *default-logging
+
+  certbot:
+    image: certbot/certbot:latest
+    restart: unless-stopped
+    volumes:
+      - letsencrypt:/etc/letsencrypt
+      - certbot_www:/var/www/certbot
+    # Renew twice daily; nginx reloads via shared volume + cron on host or sidecar.
+    entrypoint: /bin/sh -c "trap exit TERM; while :; do certbot renew --webroot -w /var/www/certbot --quiet; sleep 12h & wait $${!}; done"
+    networks: [edge]
+    logging: *default-logging

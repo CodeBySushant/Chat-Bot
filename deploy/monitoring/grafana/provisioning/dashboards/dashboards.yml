@@ -1,0 +1,10 @@
+apiVersion: 1
+providers:
+  - name: chatbot-saas
+    orgId: 1
+    folder: "Chatbot SaaS"
+    type: file
+    disableDeletion: false
+    editable: true
+    options:
+      path: /var/lib/grafana/dashboards

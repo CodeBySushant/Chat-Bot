@@ -1,0 +1,21 @@
+receivers:
+  otlp:
+    protocols:
+      grpc: { endpoint: 0.0.0.0:4317 }
+      http: { endpoint: 0.0.0.0:4318 }
+processors:
+  batch: { timeout: 5s, send_batch_size: 1024 }
+  memory_limiter: { check_interval: 5s, limit_mib: 512, spike_limit_mib: 128 }
+  resourcedetection: { detectors: [env, system] }
+exporters:
+  # Traces -> Tempo/Jaeger; metrics -> Prometheus remote-write (optional)
+  otlp/tempo:
+    endpoint: tempo:4317
+    tls: { insecure: true }
+  debug: { verbosity: basic }
+service:
+  pipelines:
+    traces:
+      receivers: [otlp]
+      processors: [memory_limiter, resourcedetection, batch]
+      exporters: [otlp/tempo]

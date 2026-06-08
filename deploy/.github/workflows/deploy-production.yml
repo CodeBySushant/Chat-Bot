@@ -1,0 +1,61 @@
+name: Deploy Production
+
+on:
+  push:
+    tags: ["v*.*.*"]
+  workflow_dispatch:
+    inputs:
+      rollback_to:
+        description: "Image tag to roll back to (leave blank for normal deploy)"
+        required: false
+
+concurrency: { group: deploy-production, cancel-in-progress: false }
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: production       # requires manual approval (configure in repo settings)
+    steps:
+      - uses: actions/checkout@v4
+      - name: Resolve tag
+        id: tag
+        run: |
+          if [ -n "${{ github.event.inputs.rollback_to }}" ]; then
+            echo "tag=${{ github.event.inputs.rollback_to }}" >> "$GITHUB_OUTPUT"
+            echo "mode=rollback" >> "$GITHUB_OUTPUT"
+          else
+            echo "tag=${GITHUB_REF_NAME}" >> "$GITHUB_OUTPUT"
+            echo "mode=deploy" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Deploy / Rollback over SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.PROD_HOST }}
+          username: ${{ secrets.DEPLOY_USER }}
+          key: ${{ secrets.DEPLOY_SSH_KEY }}
+          envs: GITHUB_SHA
+          script: |
+            set -euo pipefail
+            cd /opt/chatbot-saas
+            export TAG=${{ steps.tag.outputs.tag }}
+            echo "$TAG" > .deploy-tag.new
+            # Save current tag for rollback
+            [ -f .deploy-tag ] && cp .deploy-tag .deploy-tag.prev || true
+            docker compose -f compose/docker-compose.yml pull api worker frontend
+            # Migrations are forward-only & backwards-compatible; skip on rollback.
+            if [ "${{ steps.tag.outputs.mode }}" = "deploy" ]; then
+              docker compose -f compose/docker-compose.yml run --rm api alembic upgrade head
+            fi
+            # Rolling, start-first update (zero downtime via prod override)
+            docker compose -f compose/docker-compose.yml -f compose/docker-compose.prod.yml up -d --no-deps api worker frontend
+            if ./scripts/wait-healthy.sh api 120; then
+              mv .deploy-tag.new .deploy-tag
+              echo "Deploy of $TAG OK"
+            else
+              echo "Health check FAILED — rolling back"
+              if [ -f .deploy-tag.prev ]; then
+                export TAG=$(cat .deploy-tag.prev)
+                docker compose -f compose/docker-compose.yml -f compose/docker-compose.prod.yml up -d --no-deps api worker frontend
+              fi
+              exit 1
+            fi
