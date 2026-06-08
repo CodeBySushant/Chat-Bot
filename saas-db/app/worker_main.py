@@ -39,8 +39,13 @@ async def main() -> None:
     setup_tracing(None)
     stop = asyncio.Event()
     loop = asyncio.get_running_loop()
-    for sig in (signal.SIGTERM, signal.SIGINT):
-        loop.add_signal_handler(sig, stop.set)
+    try:
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            loop.add_signal_handler(sig, stop.set)
+    except NotImplementedError:
+        # Windows: asyncio has no add_signal_handler. Use signal.signal instead.
+        for sig in (signal.SIGTERM, signal.SIGINT):
+            signal.signal(sig, lambda *_: loop.call_soon_threadsafe(stop.set))
 
     ingest_pool.start()
     crawl_pool.start()
